@@ -4,12 +4,13 @@ import productRoutes from './routes/products.js'
 import orderRoutes from './routes/orders.js'
 import profileRoutes from './routes/profile.js'
 import authRoutes from './routes/auth.js'
+import cookieParse from 'cookie-parser'
 
 const app = express()
 
-// TODO(练习)：完成登录鉴权后，如需 httpOnly cookie 方案，请打开 credentials 并指定前端 origin
 app.use(cors())
 app.use(express.json())
+app.use(cookieParse())
 
 app.use('/api/products', productRoutes)
 app.use('/api/orders', orderRoutes)

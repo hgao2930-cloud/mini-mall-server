@@ -18,7 +18,7 @@ function mapOrder(row) {
 }
 
 // GET /api/orders
-router.get('/',authRequired, async (req, res, next) => {
+router.get('/', authRequired, async (req, res, next) => {
   try {
     const [rows] = await pool.query(
       `SELECT id, user_id, items, total_price, status, created_at
@@ -33,21 +33,56 @@ router.get('/',authRequired, async (req, res, next) => {
 })
 
 // POST /api/orders —— 下单（商品快照 + 金额）
-router.post('/',authRequired, async (req, res, next) => {
+router.post('/', authRequired, async (req, res, next) => {
   try {
-    const { items, totalPrice } = req.body || {}
+    const { items } = req.body || {}
     if (!Array.isArray(items) || items.length === 0) {
       return res.status(400).json({ message: '订单不能为空' })
     }
-    if (typeof totalPrice !== 'number') {
-      return res.status(400).json({ message: '订单金额不合法' })
+    let isValid = true
+    const validItems = new Map()
+    items.forEach((item) => {
+      if (!item) return isValid = false
+      if (!item.product) return isValid = false
+      if (!item.product.id) return isValid = false
+      if (typeof (item.quantity) !== 'number' || item.quantity <= 0 || !Number.isInteger(item.quantity)) return isValid = false
+      validItems.set(item.product.id, item.quantity)
+    })
+    if (!isValid) {
+      return res.status(400).json({ message: '订单数据不合法' })
     }
-
+    const ids = items.map(item => item.product.id)
+    const placeholders = ids.map(() => '?').join(',')
+    const [products] = await pool.query(
+      `SELECT id, name, price, image, description, category FROM products WHERE id IN (${placeholders})`,
+      ids
+    )
+    if (validItems.size !== products.length) {
+      return res.status(400).json({ message: '商品不存在' })
+    }
+    const productMap = new Map(products.map(p => [p.id, p]))
+    // 商品快照由服务端从数据库生成，不信任客户端传来的商品名称/价格/图片
+    const snapshot = []
+    let totalPrice = 0
+    for (const item of items) {
+      const product = productMap.get(item.product.id)
+      snapshot.push({
+        product: {
+          id: product.id,
+          name: product.name,
+          price: product.price,
+          image: product.image,
+          description: product.description,
+          category: product.category,
+        },
+        quantity: item.quantity,
+      })
+      totalPrice += product.price * item.quantity
+    }
     const [result] = await pool.query(
       'INSERT INTO orders (user_id, items, total_price) VALUES (?, ?, ?)',
-      [req.userId, JSON.stringify(items), totalPrice],
+      [req.userId, JSON.stringify(snapshot), totalPrice],
     )
-
     const [rows] = await pool.query(
       'SELECT id, user_id, items, total_price, status, created_at FROM orders WHERE id = ?',
       [result.insertId],
@@ -59,7 +94,7 @@ router.post('/',authRequired, async (req, res, next) => {
 })
 
 // PATCH /api/orders/:id —— 状态流转（只允许自己的订单）
-router.patch('/:id',authRequired, async (req, res, next) => {
+router.patch('/:id', authRequired, async (req, res, next) => {
   try {
     const { status } = req.body || {}
     const [rows] = await pool.query(
